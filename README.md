@@ -9,6 +9,7 @@ A production-ready computer-use skill for the **Session 10
 Three tasks demonstrate all five cascade layers.  Every run is recorded via
 `start_recording` and saved as a trajectory directory under `trajectories/`.
 
+https://www.youtube.com/watch?v=0dRCjfMh4Sw
 ---
 
 ## Quick Start
