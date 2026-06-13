@@ -201,16 +201,9 @@ def _layer2b_vscode(cua: CuaDriver, ctx: dict) -> dict:
 
     # ── 5. Use page tool to type in the terminal ──────────────────────────────
     # Attempt via page evaluate (CDP JavaScript execution).
-
-    # JavaScript to write the file via Node.js require('fs') in VS Code's
-    # main process, accessed via the Electron IPC bridge available in
-    # VS Code's renderer.
+    # The `page evaluate` tool does not take window_id; pass pid only.
     write_script = f"""
 (function() {{
-    try {{
-        const vscode = acquireVsCodeApi ? acquireVsCodeApi() : null;
-    }} catch(e) {{}}
-    // Use Node fs via Electron's contextBridge or direct require
     try {{
         const fs = require('fs');
         fs.writeFileSync(
@@ -234,27 +227,39 @@ def _layer2b_vscode(cua: CuaDriver, ctx: dict) -> dict:
         page_result = {}
 
     # ── 6. Terminal fallback ─────────────────────────────────────────────────
-    # If the CDP script approach didn't work, type an echo command in the
-    # terminal that was opened by Ctrl+`.
+    # If the CDP script approach didn't work, type the write command into the
+    # integrated terminal opened by Ctrl+`, then echo back the file content so
+    # something is visible in the terminal panel.
     if not _file_written_successfully(NOTE_PATH):
-        logger.info("[2b] Falling back to terminal echo command …")
-        # Click in the terminal area first
+        logger.info("[2b] Falling back to terminal write …")
         try:
             cua.page(pid, "click", selector=".xterm-cursor-layer, .terminal")
             time.sleep(0.5)
         except Exception:
             pass
 
-        # Base64-encode the content so the typed command contains only
-        # alphanumeric + /+= characters — no backticks, em-dashes, or quotes
-        # that PowerShell 5.1 would misinterpret as escape sequences.
+        # Base64-encode content so the command is safe for PowerShell 5.1
+        # (no backticks, quotes, or special chars from VSCODE_NOTE_CONTENT).
         b64 = base64.b64encode(VSCODE_NOTE_CONTENT.encode("utf-8")).decode("ascii")
-        cmd = (
+        write_cmd = (
             f"python -c \"import base64; open({repr(str(NOTE_PATH))}, 'wb')"
             f".write(base64.b64decode('{b64}'))\"\n"
         )
-        cua.type_text(pid, window_id, cmd)
+        cua.type_text(pid, window_id, write_cmd)
         time.sleep(2.0)
+
+    # ── 6b. Print file content in the terminal for visual confirmation ────────
+    # Regardless of which path wrote the file, echo it back into the terminal
+    # so the VS Code terminal panel shows something meaningful.
+    logger.info("[2b] Printing file content to terminal …")
+    try:
+        cua.page(pid, "click", selector=".xterm-cursor-layer, .terminal")
+        time.sleep(0.3)
+    except Exception:
+        pass
+    show_cmd = f"Get-Content {repr(str(NOTE_PATH))}\n"
+    cua.type_text(pid, window_id, show_cmd)
+    time.sleep(1.5)
 
     # ── 7. Also open the file in the editor for visual confirmation ───────────
     try:

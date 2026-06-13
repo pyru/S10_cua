@@ -208,10 +208,21 @@ def _layer2a_calculator(cua: CuaDriver, ctx: dict) -> dict:
     # ── 6. Re-scan to read display ────────────────────────────────────────────
     time.sleep(0.5)
     logger.info("[2a] Verifying result …")
-    verify_state = cua.get_window_state(
-        pid, window_id, capture_mode="ax", query=CALC_EXPECTED,
-    )
+    # UWP Calculator reassigns window_id after UI interactions; refresh before
+    # the verification call to avoid a "window does not exist" error.
+    try:
+        fresh_win = cua.wait_for_window(pid, timeout=5, title_hint=CALC_APP_NAME)
+        window_id = int(fresh_win["window_id"])
+        ctx["window_id"] = window_id
+        logger.info(f"[2a] Refreshed window_id={window_id}")
+    except Exception as exc:
+        logger.warning(f"[2a] Could not refresh window_id: {exc}, keeping {window_id}")
+    # No query filter: "579" never appears as an element label — UWP stores it
+    # as the value of the CalculatorResults Text node ("Display is 579").
+    # Fetching the full tree lets _extract_display scan all value= fields.
+    verify_state = cua.get_window_state(pid, window_id, capture_mode="ax")
     verify_tree  = verify_state.get("tree_markdown", "")
+    logger.info(f"[2a] Verify tree:\n{verify_tree[:3000]}")
     display_val  = _extract_display(verify_tree, verify_state)
     ctx["display_value"] = display_val
     logger.info(f"[2a] Display value: '{display_val}'")
@@ -241,34 +252,37 @@ def _parse_button_indices(tree_markdown: str) -> dict[str, int]:
     """
     Parse a cua-driver AX tree markdown string into a token → element_index map.
 
-    The tree format tags every actionable element as:
-      ... [element_index N] ... AXButton "Label" ...
-    OR
-      ... AXButton "Label" ... [element_index N] ...
+    Handles two formats emitted by different cua-driver versions:
 
-    We try multiple regexes to cover both orderings.  We use the FIRST
-    occurrence of each label (§6.3 duplicate AXWindow workaround).
+      Old / macOS:  - [5] Button "One" [element_index 5]
+      Windows UWP:  - [25] Button "One" [id=num1Button actions=[invoke]]
+
+    In the Windows format the bracketed number at the start of the line IS
+    the element_index used by cua.click(element_index=N).
     """
     result: dict[str, int] = {}
 
-    # Pattern: [element_index N] followed later by the label, OR label then index.
-    patterns = [
-        # "7" [element_index 5]
-        r'"([^"]+)"\s*\[element_index\s+(\d+)\]',
-        # [element_index 5] "7"
-        r'\[element_index\s+(\d+)\]\s+[^\[]*?"([^"]+)"',
-    ]
-
     for line in tree_markdown.splitlines():
-        for pat_idx, pat in enumerate(patterns):
-            for m in re.finditer(pat, line, re.IGNORECASE):
-                if pat_idx == 0:
-                    label, idx = m.group(1), int(m.group(2))
-                else:
-                    idx, label = int(m.group(1)), m.group(2)
-                # Only insert the first occurrence of each label.
-                if label not in result:
-                    result[label] = idx
+        # Format A: explicit [element_index N] tag
+        m = re.search(r'"([^"]+)"\s*\[element_index\s+(\d+)\]', line, re.IGNORECASE)
+        if m:
+            label, idx = m.group(1), int(m.group(2))
+            if label not in result:
+                result[label] = idx
+            continue
+        m = re.search(r'\[element_index\s+(\d+)\]\s+[^\[]*?"([^"]+)"', line, re.IGNORECASE)
+        if m:
+            idx, label = int(m.group(1)), m.group(2)
+            if label not in result:
+                result[label] = idx
+            continue
+
+        # Format B: Windows UWP — "- [N] Button/Text "Label" [id=... actions=[...]]"
+        m = re.match(r'\s*-\s+\[(\d+)\]\s+\w+\s+"([^"]+)"', line)
+        if m:
+            idx, label = int(m.group(1)), m.group(2)
+            if label not in result:
+                result[label] = idx
 
     return result
 
@@ -309,20 +323,27 @@ def _extract_display(tree_markdown: str, _state: dict) -> str:
     """
     Extract the current display value from the post-click AX tree.
 
-    Tries several heuristics in order:
-      1. AXStaticText element whose value matches digits.
-      2. Any value= field containing digits.
-      3. Return empty string as a safe fallback.
+    Tries several heuristics in order to cover both macOS (AXStaticText)
+    and Windows UWP (Text / value= with "Display is N" prefix) formats.
     """
-    # Pattern: AXStaticText = "579" or AXStaticText "579"
     patterns = [
+        # macOS: AXStaticText = "579"
         r'AXStaticText\s*=\s*"([0-9,.\s]+)"',
         r'AXStaticText\s+"([0-9,.\s]+)"',
+        # Windows UWP CalculatorResults: "Display is 579" in label or value=
+        r'"Display is ([0-9,.\s]+)"',
+        r'id=CalculatorResults[^\n]*?value\s*=\s*"([^"]+)"',
+        r'value\s*=\s*"Display is ([0-9,.\s]+)"',
+        # Generic: value= field whose content is purely numeric (no letters)
         r'value\s*=\s*"([0-9,.\s]+)"',
+        # Last resort: any quoted standalone number in the tree
         r'"([0-9]+(?:[,\.][0-9]+)*)"',
     ]
     for pat in patterns:
-        m = re.search(pat, tree_markdown)
+        m = re.search(pat, tree_markdown, re.IGNORECASE)
         if m:
-            return m.group(1).strip()
+            val = m.group(1).strip()
+            # Strip a "Display is " prefix if it leaked through
+            val = re.sub(r'^Display is\s+', '', val, flags=re.IGNORECASE)
+            return val
     return ""
