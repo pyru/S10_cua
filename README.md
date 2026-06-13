@@ -1,6 +1,9 @@
-# CUA Session 9 — Computer-Use Skill
+Session 10
+# CUA Session 10
+ — Computer-Use Skill
 
-A production-ready computer-use skill for the **Session 9 catalogue** built on
+A production-ready computer-use skill for the **Session 10
+ catalogue** built on
 [cua-driver](https://github.com/trycua/cua) and the **LLM Gateway V9** (port 8109).
 
 Three tasks demonstrate all five cascade layers.  Every run is recorded via
@@ -308,7 +311,8 @@ export LLM_GATEWAY_V9_URL=http://localhost:8109
 Session10Code/
 ├── CUA_DRIVER_GUIDE.md          ← read before implementation
 ├── skills/
-│   └── computer_use_session9/   ← Session 9 catalogue drop-in
+│   └── computer_use_session9/   ← Session 10
+ catalogue drop-in
 │       ├── __init__.py
 │       ├── skill.py             ← ComputerUseSkill class
 │       ├── config.py            ← all tunable parameters

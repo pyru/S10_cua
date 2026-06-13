@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/ /d/ -name \"cua-driver*\" -type f 2>/dev/null | head -20; which cua-driver 2>/dev/null || echo \"not on PATH\")",
+      "Read(//c//**)"
+    ]
+  }
+}
