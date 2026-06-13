@@ -146,6 +146,8 @@ class CuaDriver:
         self,
         name: str = None,
         bundle_id: str = None,
+        urls: list[str] = None,
+        additional_arguments: list[str] = None,
         electron_debugging_port: int = None,
         webkit_inspector_port: int = None,
     ) -> dict:
@@ -153,13 +155,19 @@ class CuaDriver:
 
         On macOS use `bundle_id` for reliable identification.
         On Windows use `name` (matches the executable or window title).
-        Returns dict with at least {"pid": int}.
+        Pass `additional_arguments` to forward CLI args to the launched process.
+        Pass `urls` to open URLs in the default browser (Windows: ShellExecuteEx).
+        Returns dict with at least {"pid": int} and a "windows" array on Windows.
         """
         args: dict[str, Any] = {}
         if name:
             args["name"] = name
         if bundle_id:
             args["bundle_id"] = bundle_id
+        if urls:
+            args["urls"] = urls
+        if additional_arguments:
+            args["additional_arguments"] = additional_arguments
         if electron_debugging_port:
             args["electron_debugging_port"] = electron_debugging_port
         if webkit_inspector_port:

@@ -30,12 +30,11 @@ V9 Gateway note: ALL vision calls go through /v1/vision on port 8109.
 
 from __future__ import annotations
 
+import base64
 import logging
-import platform
 import re
 import subprocess
 import time
-from pathlib import Path
 
 from ..cascade import (
     CascadeController,
@@ -154,6 +153,7 @@ def _layer2a_try_ax(cua: CuaDriver, ctx: dict) -> None:
     pid       = ctx["pid"]
     window_id = ctx["window_id"]
 
+    cua.bring_to_front(pid, window_id)
     time.sleep(2.0)  # let the canvas JS render
 
     try:
@@ -165,15 +165,17 @@ def _layer2a_try_ax(cua: CuaDriver, ctx: dict) -> None:
         logger.info(f"[2a] AX element_count={count}")
         logger.debug(f"[2a] AX tree snippet:\n{tree[:500]}")
 
-        # Check whether the target's pixel coordinates appear in the AX tree.
-        if not re.search(r"TARGET|red|circle|dot", tree, re.IGNORECASE):
-            raise EscalateToNextLayer(
-                f"AX tree ({count} elements) has no addressable target element. "
-                "The <canvas> is opaque to UIA/AX — pixel content is not exposed "
-                "as structured accessibility nodes (CUA_DRIVER_GUIDE.md §7.3)."
-            )
-        # If somehow there IS a target element, click it.
-        return {"ax_found_target": True, "tree": tree[:200]}
+        # The canvas draws its content (the red circle + "▶ TARGET ◀" label) via
+        # Canvas 2D API — none of that is exposed as AX nodes. Buttons like
+        # "New Target" will appear in the tree but are UI controls, not the
+        # click target. Always escalate; the tree is logged for educational value.
+        raise EscalateToNextLayer(
+            f"AX tree ({count} elements) has no addressable target element. "
+            "The <canvas> is opaque to UIA/AX — pixel content (red circle, "
+            "▶ TARGET ◀ label) is not exposed as structured accessibility nodes "
+            "(CUA_DRIVER_GUIDE.md §7.3). UI buttons like 'New Target' are not "
+            "the click target."
+        )
 
     except EscalateToNextLayer:
         raise
@@ -273,19 +275,12 @@ def _layer3_vision(cua: CuaDriver, gateway: GatewayClient, ctx: dict) -> dict:
     window_id = ctx["window_id"]
 
     # ── 1. Screenshot ─────────────────────────────────────────────────────────
-    logger.info("[3] Taking screenshot (capture_mode=vision) …")
+    logger.info("[3] Bringing browser to front and taking screenshot …")
+    cua.bring_to_front(pid, window_id)
+    time.sleep(1.0)  # let the window paint before capture
     SCREENSHOT_TMP.parent.mkdir(parents=True, exist_ok=True)
-    snap = cua.get_window_state(
-        pid,
-        window_id,
-        capture_mode="vision",
-        screenshot_out_file=str(SCREENSHOT_TMP),
-    )
-    if not SCREENSHOT_TMP.exists():
-        raise RuntimeError(
-            f"Screenshot not written to {SCREENSHOT_TMP}. "
-            "Check Screen Recording permission (macOS) or cua-driver logs."
-        )
+    snap = cua.get_window_state(pid, window_id, capture_mode="vision")
+    _write_screenshot(snap, SCREENSHOT_TMP)
     logger.info(f"[3] Screenshot saved: {SCREENSHOT_TMP}  ({SCREENSHOT_TMP.stat().st_size} bytes)")
 
     # ── 2. Vision call — locate target ───────────────────────────────────────
@@ -333,12 +328,10 @@ def _layer3_vision(cua: CuaDriver, gateway: GatewayClient, ctx: dict) -> dict:
     # ── 4. Verification screenshot ────────────────────────────────────────────
     verify_path = SCREENSHOT_TMP.parent / "cua_session9_verify.png"
     logger.info("[3] Taking verification screenshot …")
-    cua.get_window_state(
-        pid,
-        window_id,
-        capture_mode="vision",
-        screenshot_out_file=str(verify_path),
-    )
+    cua.bring_to_front(pid, window_id)
+    time.sleep(0.5)
+    verify_snap = cua.get_window_state(pid, window_id, capture_mode="vision")
+    _write_screenshot(verify_snap, verify_path)
 
     # ── 5. Vision call — verify hit ───────────────────────────────────────────
     verify_prompt = (
@@ -387,6 +380,21 @@ def _layer3_vision(cua: CuaDriver, gateway: GatewayClient, ctx: dict) -> dict:
     }
 
 
+# ── Screenshot helper ─────────────────────────────────────────────────────────
+
+def _write_screenshot(state: dict, out_path) -> None:
+    """Decode screenshot_png_b64 from a get_window_state response and write to out_path."""
+    b64 = state.get("screenshot_png_b64")
+    if not b64:
+        raise RuntimeError(
+            f"get_window_state(vision) returned no screenshot_png_b64. "
+            f"Keys present: {list(state.keys())}"
+        )
+    SCREENSHOT_TMP.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(base64.b64decode(b64))
+
+
 # ── Browser open helper ────────────────────────────────────────────────────────
 
 def _open_canvas(cua: CuaDriver, ctx: dict) -> None:
@@ -404,38 +412,58 @@ def _open_canvas(cua: CuaDriver, ctx: dict) -> None:
     if ctx.get("pid"):
         return  # already open
 
-    logger.info(f"[canvas] Opening {html_path} in browser …")
     file_url = html_path.as_uri()
+    logger.info(f"[canvas] Opening {html_path} in browser ({CANVAS_BROWSER}) …")
 
-    # Try cua-driver launch_app first; fall back to OS open command.
+    pid        = None
+    window_id  = None
+
+    # Primary: launch browser with the URL as a CLI argument — cua-driver
+    # returns pid + windows array immediately on Windows.
     try:
-        resp = cua.launch_app(name=CANVAS_BROWSER, url=file_url)
-        pid  = resp.get("pid")
+        resp = cua.launch_app(
+            name=CANVAS_BROWSER,
+            additional_arguments=[file_url],
+        )
+        pid = resp.get("pid")
+        windows = resp.get("windows", [])
+        if windows:
+            window_id = int(windows[0]["window_id"])
+            logger.info(f"[canvas] Browser launched: pid={pid} wid={window_id}")
     except Exception as exc:
-        logger.debug(f"launch_app failed ({exc}), using OS open …")
-        pid = _os_open_browser(file_url)
+        logger.debug(f"[canvas] launch_app failed ({exc}), falling back to OS open …")
+        _os_open_browser(file_url)
+        time.sleep(3.0)
 
-    if not pid:
-        # Detect the browser window by scanning new windows.
+    # If no window yet, scan for the browser window by title.
+    if not window_id:
         time.sleep(3.0)
         win_list = cua.list_windows().get("windows", [])
         for w in win_list:
             title = (w.get("title") or "").lower()
-            if "canvas" in title or "cua" in title or "chrome" in title or "edge" in title:
+            if "canvas" in title or "cua" in title:
                 pid       = w["pid"]
-                ctx["pid"]       = pid
-                ctx["window_id"] = int(w["window_id"])
-                logger.info(f"[canvas] Detected browser: pid={pid} wid={ctx['window_id']}")
-                return
+                window_id = int(w["window_id"])
+                logger.info(f"[canvas] Detected browser by title: pid={pid} wid={window_id}")
+                break
+        # Wider fallback: any browser window
+        if not window_id:
+            for w in win_list:
+                title = (w.get("title") or "").lower()
+                if "edge" in title or "chrome" in title or "firefox" in title:
+                    pid       = w["pid"]
+                    window_id = int(w["window_id"])
+                    logger.info(f"[canvas] Detected browser by name: pid={pid} wid={window_id}")
+                    break
 
-    ctx["pid"] = pid
-    if pid:
-        time.sleep(2.0)
-        win = cua.wait_for_window(pid, timeout=20)
-        ctx["window_id"] = int(win["window_id"])
-        logger.info(f"[canvas] Browser pid={pid} wid={ctx['window_id']}")
-    else:
-        raise RuntimeError("Could not determine browser pid after opening canvas HTML.")
+    if not pid or not window_id:
+        raise RuntimeError(
+            "Could not determine browser pid/window_id after opening canvas HTML. "
+            f"CANVAS_BROWSER={CANVAS_BROWSER!r} file_url={file_url!r}"
+        )
+
+    ctx["pid"]       = pid
+    ctx["window_id"] = window_id
 
 
 def _os_open_browser(url: str) -> int:
