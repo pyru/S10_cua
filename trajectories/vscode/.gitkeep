@@ -1,0 +1,8 @@
+# Trajectory evidence for Task 2 (VS Code Electron page tool) will appear here.
+# Each run creates a timestamped subdirectory:
+#   trajectories/vscode/YYYYMMDD_HHMMSS/
+#     turn_0001.json       <- launch_app (with electron_debugging_port=9222)
+#     turn_0002.json       <- page evaluate (CDP JavaScript)
+#     turn_0003.json       <- page evaluate (DOM title verification)
+#     ...
+#     run_metadata.json

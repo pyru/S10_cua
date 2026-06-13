@@ -1,0 +1,7 @@
+# Trajectory evidence for Task 1 (Calculator) will appear here.
+# Each run creates a timestamped subdirectory:
+#   trajectories/calculator/YYYYMMDD_HHMMSS/
+#     turn_0001.json       <- cua-driver tool call + result
+#     turn_0002.json
+#     ...
+#     run_metadata.json    <- layer_used, elapsed, success, escalations

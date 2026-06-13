@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Trajectory evidence directories (submit these separately as evidence)
+# Keep the .gitkeep stubs but ignore the actual run directories
+trajectories/*/*/
+!trajectories/**/.gitkeep
+
+# Screenshots (regenerated each run)
+*.png
+*.jpg
+*.jpeg
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Environment
+.env
+.env.local
+*.env
+
+# Note files created by Task 2 (VS Code task) — these are evidence
+# Uncomment to exclude if they contain sensitive content:
+# cua_session9_note.md
+
+# cua-driver daemon files
+*.sock
+cua-driver.log
+
+# Gateway database files
+*.db
+
+# OS
+Thumbs.db
+desktop.ini

@@ -1,0 +1,10 @@
+# Trajectory evidence for Task 3 (Canvas vision task) will appear here.
+# Each run creates a timestamped subdirectory:
+#   trajectories/vision_canvas/YYYYMMDD_HHMMSS/
+#     turn_0001.json       <- launch_app / OS open (browser)
+#     turn_0002.json       <- get_window_state (AX scan — escalates)
+#     turn_0003.json       <- page evaluate (DOM — escalates)
+#     turn_0004.json       <- get_window_state (vision mode — screenshot)
+#     turn_0005.json       <- click (pixel coordinates from LLM)
+#     turn_0006.json       <- get_window_state (verification screenshot)
+#     run_metadata.json    <- layer_used=3, escalations=[2a→3, 2b→3]

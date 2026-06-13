@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CUA Vision Canvas Task</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d0d1a;
+      color: #e0e0e0;
+      font-family: 'Courier New', Courier, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px;
+      min-height: 100vh;
+    }
+    h1 {
+      color: #00ff88;
+      font-size: 18px;
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+    }
+    #status {
+      width: 820px;
+      padding: 10px 16px;
+      background: #16213e;
+      border: 1px solid #00ff88;
+      border-radius: 4px;
+      font-size: 14px;
+      margin-bottom: 8px;
+      min-height: 38px;
+      color: #00ff88;
+      transition: background 0.3s;
+    }
+    #status.hit  { background: #003300; color: #00ff88; }
+    #status.miss { background: #330000; color: #ff8800; }
+    #canvas {
+      border: 2px solid #00ff88;
+      border-radius: 4px;
+      cursor: crosshair;
+      display: block;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    button {
+      background: #0f3460;
+      color: #00ff88;
+      border: 1px solid #00ff88;
+      padding: 8px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: 1px;
+      transition: background 0.2s;
+    }
+    button:hover { background: #1a5080; }
+    #coords {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>[ CUA VISION CANVAS TARGET ]</h1>
+  <div id="status">Status: Initialising target …</div>
+  <canvas id="canvas" width="820" height="520"></canvas>
+  <div class="controls">
+    <button onclick="resetTarget()">New Target</button>
+    <button onclick="clearCanvas()">Clear</button>
+    <button onclick="showInfo()">Info</button>
+  </div>
+  <div id="coords">Move mouse over canvas to see coordinates</div>
+
+  <script>
+    const canvas  = document.getElementById('canvas');
+    const ctx     = canvas.getContext('2d');
+    const status  = document.getElementById('status');
+    const coordEl = document.getElementById('coords');
+
+    let targetX = 0, targetY = 0;
+    let clickCount = 0;
+    let hitCount   = 0;
+
+    // ── Drawing helpers ──────────────────────────────────────────────────────
+
+    function drawBackground() {
+      // Dark grid background — makes this clearly a "canvas" task
+      ctx.fillStyle = '#0d0d1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#1a1a30';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+    }
+
+    function drawTarget(x, y) {
+      // Outer glow ring
+      const grd = ctx.createRadialGradient(x, y, 0, x, y, 30);
+      grd.addColorStop(0,   'rgba(255,34,68,0.8)');
+      grd.addColorStop(0.7, 'rgba(255,34,68,0.3)');
+      grd.addColorStop(1,   'rgba(255,34,68,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(x, y, 30, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Main red circle (radius 20) — this is the click target
+      ctx.fillStyle   = '#ff2244';
+      ctx.strokeStyle = '#ffee00';
+      ctx.lineWidth   = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Cross-hair centre marker
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - 8, y); ctx.lineTo(x + 8, y); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, y - 8); ctx.lineTo(x, y + 8); ctx.stroke();
+
+      // Label above the circle (not inside — keeps it visible for vision model)
+      ctx.fillStyle = 'rgba(255,238,0,0.9)';
+      ctx.font      = 'bold 13px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText(`▶ TARGET ◀`, x, y - 32);
+      ctx.fillStyle = 'rgba(200,200,200,0.7)';
+      ctx.font      = '11px Courier New';
+      ctx.fillText(`canvas(${x}, ${y})`, x, y - 18);
+    }
+
+    function drawClickMark(x, y, isHit) {
+      ctx.fillStyle   = isHit ? '#00ff88' : '#ff8800';
+      ctx.strokeStyle = isHit ? '#ffffff' : '#ff4400';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font      = '10px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText(clickCount, x, y + 4);
+    }
+
+    // ── State management ─────────────────────────────────────────────────────
+
+    function resetTarget() {
+      // Margins so the target is never clipped by the status bar or edges
+      targetX = 60 + Math.floor(Math.random() * (canvas.width  - 120));
+      targetY = 40 + Math.floor(Math.random() * (canvas.height - 80));
+      drawBackground();
+      drawTarget(targetX, targetY);
+      status.textContent = `Status: Target at canvas(${targetX}, ${targetY}) — click the red dot!`;
+      status.className   = '';
+    }
+
+    function clearCanvas() {
+      drawBackground();
+      resetTarget();
+    }
+
+    function showInfo() {
+      status.textContent = (
+        `Clicks: ${clickCount}  |  Hits: ${hitCount}  |  `
+        + `Target: canvas(${targetX}, ${targetY})`
+      );
+      status.className = '';
+    }
+
+    // ── Interaction ──────────────────────────────────────────────────────────
+
+    canvas.addEventListener('mousemove', function(e) {
+      const r  = canvas.getBoundingClientRect();
+      const cx = Math.round(e.clientX - r.left);
+      const cy = Math.round(e.clientY - r.top);
+      coordEl.textContent = `Canvas coords: (${cx}, ${cy})  |  Target: (${targetX}, ${targetY})  |  Dist: ${Math.round(Math.hypot(cx-targetX, cy-targetY))}px`;
+    });
+
+    canvas.addEventListener('click', function(e) {
+      const r    = canvas.getBoundingClientRect();
+      const cx   = Math.round(e.clientX - r.left);
+      const cy   = Math.round(e.clientY - r.top);
+      const dist = Math.hypot(cx - targetX, cy - targetY);
+      const hit  = dist <= 25;
+      clickCount++;
+      if (hit) hitCount++;
+
+      drawClickMark(cx, cy, hit);
+
+      if (hit) {
+        status.textContent = (
+          `Status: ✓ HIT! Click(${cx}, ${cy}) — dist=${Math.round(dist)}px — `
+          + `Hits: ${hitCount}/${clickCount}`
+        );
+        status.className = 'hit';
+      } else {
+        status.textContent = (
+          `Status: ✗ MISS. Click(${cx}, ${cy}) — dist=${Math.round(dist)}px — `
+          + `need ≤25px. Target at (${targetX}, ${targetY})`
+        );
+        status.className = 'miss';
+      }
+    });
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    resetTarget();
+  </script>
+</body>
+</html>

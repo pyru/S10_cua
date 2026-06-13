@@ -1,0 +1,19 @@
+# Session 9 Computer-Use Skill dependencies
+# Install with: pip install -r requirements.txt
+# Or with uv:   uv pip install -r requirements.txt
+
+# HTTP client (used by gateway_client.py)
+httpx>=0.27.0
+
+# (Optional) rich output for CLI
+rich>=13.0.0
+
+# The cua-driver binary is NOT a Python package.
+# Install it separately via its install script:
+#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh)"
+# Then grant permissions on macOS:
+#   ~/.local/bin/cua-driver permissions grant
+
+# LLM Gateway V9 must be running on port 8109.
+# Start it from the llm_gatewayV9/ directory:
+#   cd llm_gatewayV9 && ./run.sh
